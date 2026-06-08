@@ -6,13 +6,16 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.ScaleGestureDetector;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.camera.core.Camera;
 import androidx.camera.core.CameraInfoUnavailableException;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.Preview;
+import androidx.camera.core.ZoomState;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -41,8 +44,10 @@ public class ScannerActivity extends AegisActivity implements QrCodeAnalyzer.Lis
     private int _currentLens;
 
     private Menu _menu;
+    private Camera _camera;
     private ImageAnalysis _analysis;
     private PreviewView _previewView;
+    private ScaleGestureDetector _zoomGestureDetector;
     private ExecutorService _executor;
 
     private int _batchId = 0;
@@ -63,6 +68,21 @@ public class ScannerActivity extends AegisActivity implements QrCodeAnalyzer.Lis
         _lenses = new ArrayList<>();
         _previewView = findViewById(R.id.preview_view);
         _executor = Executors.newSingleThreadExecutor();
+
+        _zoomGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                zoom(detector.getScaleFactor());
+                return true;
+            }
+        });
+        _previewView.setOnTouchListener((view, event) -> {
+            _zoomGestureDetector.onTouchEvent(event);
+            if (event.getAction() == android.view.MotionEvent.ACTION_UP) {
+                view.performClick();
+            }
+            return true;
+        });
 
         _cameraProviderFuture = ProcessCameraProvider.getInstance(this);
         _cameraProviderFuture.addListener(() -> {
@@ -163,12 +183,28 @@ public class ScannerActivity extends AegisActivity implements QrCodeAnalyzer.Lis
                 .build();
         _analysis.setAnalyzer(_executor, new QrCodeAnalyzer(this));
 
-        cameraProvider.bindToLifecycle(this, selector, preview, _analysis);
+        _camera = cameraProvider.bindToLifecycle(this, selector, preview, _analysis);
     }
 
     private void unbindPreview(@NonNull ProcessCameraProvider cameraProvider) {
+        _camera = null;
         _analysis = null;
         cameraProvider.unbindAll();
+    }
+
+    private void zoom(float scaleFactor) {
+        if (_camera == null) {
+            return;
+        }
+
+        ZoomState zoomState = _camera.getCameraInfo().getZoomState().getValue();
+        if (zoomState == null) {
+            return;
+        }
+
+        float zoomRatio = zoomState.getZoomRatio() * scaleFactor;
+        zoomRatio = Math.max(zoomState.getMinZoomRatio(), Math.min(zoomRatio, zoomState.getMaxZoomRatio()));
+        _camera.getCameraControl().setZoomRatio(zoomRatio);
     }
 
     @Override
